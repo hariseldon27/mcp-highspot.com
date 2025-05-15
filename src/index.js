@@ -1,3 +1,4 @@
+import 'dotenv/config';
 //console.log("[DEBUG] newrelic-addition-mcp/index.js loaded");
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -47,19 +48,21 @@ server.tool("add",
 );
 // #endregion
 
-// #region Highspot API Integration
+// #region Highspot API Integration Tools
 async function searchHighspot(query) {
   const encodedQuery = encodeURIComponent(query);
   const url = `https://api-su2.highspot.com/v1.0/search/items?query-string=${encodedQuery}&start=0&limit=10&sortby=relevancy`;
 
-  // Replace this with a secure method in production!
-  const AUTH_TOKEN = "ZWQwZGM1ZjFlOGQxOWJmOWMwZWQ6N2JjNTIwNWQ1MGM0YmYyZjg4MTc4NTY5MTJkOWU5NjZjMDU0YjIxZTMxY2RiYzg1NzQ0OGJjYzEyZDcxOGM5Yg==";
+  // Use username and password from environment variables for HTTP Basic Auth
+  const username = process.env.HIGHSPOT_USERNAME;
+  const password = process.env.HIGHSPOT_PASSWORD;
+  const authString = Buffer.from(`${username}:${password}`).toString('base64');
 
   const response = await fetch(url, {
     method: "GET",
     headers: {
       "accept": "application/json",
-      "Authorization": `Basic ${AUTH_TOKEN}`
+      "Authorization": `Basic ${authString}`
     }
   });
 
@@ -69,9 +72,8 @@ async function searchHighspot(query) {
 
   return await response.json();
 }
-// #endregion
 
-// #region Highspot Tools
+
 // New Tool 2: searchHighspot
 // This tool is used to search the Highspot knowledge base.
 // It takes a search query as input and returns the results of the search.
@@ -90,6 +92,9 @@ server.tool("searchHighspot",
     }
   }
 );
+// #endregion
+
+
 // #region Prompts
 // New Prompt 1: requestExpressionForAddition
 // This prompt is used to request an addition expression from the user.
