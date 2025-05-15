@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mcp_highspot_doc_search": {
+      "command": "node",
+      "args": ["/Users/dmurraymiyamasu/Source/mcp-highspot.com/src/index.js"],
+      "env": {
+        "HIGHSPOT_API_TOKEN": "ed0dc5f1e8d19bf9c0ed"
+      },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
