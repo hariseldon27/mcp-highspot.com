@@ -1,26 +1,32 @@
 import 'dotenv/config';
-//console.log("[DEBUG] newrelic-addition-mcp/index.js loaded");
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+// Schemas for ListPrompts and GetPrompt are likely handled by the server internally
+// if server.setRequestHandler is removed. We keep the import if they are needed elsewhere,
+// but their explicit handling via setRequestHandler is removed.
+// import {
+//   ListPromptsRequestSchema,  // No longer used with setRequestHandler
+//   GetPromptRequestSchema    // No longer used with setRequestHandler
+// } from "@modelcontextprotocol/sdk/types.js"; 
 
 // #region Server Configuration
 const server = new McpServer({
-  name: "Number Addition",
-  version: "1.0.0", 
-  description: "This MCP server provides a tool for adding numbers. It can be used to add numbers in an expression, or to provide help on how to use the 'add' tool.",
-  icon: "https://newrelic.com/favicon.ico",
-  author: "New Relic",
-  contact: "https://newrelic.com/contact",
+  name: "Number Addition & Highspot Search",
+  version: "1.0.0",
+  description: "This MCP server provides tools for adding numbers and searching Highspot.",
+  icon: "https://newrelic.com/favicon.ico", // Replace with a more relevant icon if available
+  author: "New Relic", // Replace with actual author
+  contact: "https://newrelic.com/contact", // Replace with actual contact
   license: "MIT",
-  website: "https://newrelic.com",
-  tags: ["addition", "numbers", "calculator", "math", "tool"],
-  categories: ["math", "calculator", "tool"],
-  keywords: ["addition", "numbers", "calculator", "math", "tool"]
+  website: "https://newrelic.com", // Replace with actual website
+  tags: ["addition", "numbers", "calculator", "math", "tool", "highspot", "search"],
+  categories: ["math", "calculator", "tool", "search"],
+  keywords: ["addition", "numbers", "calculator", "math", "tool", "highspot", "search"]
 });
 // #endregion
 
-// #region Example Addition Tools
+// #region Example Addition Tools / Functions
 export function addExpression(expression) {
   const parts = expression.split('+').map(num => num.trim());
   if (parts.length < 2 || parts.some(part => part === '' || isNaN(Number(part)))) {
@@ -30,10 +36,8 @@ export function addExpression(expression) {
   return numbers.reduce((sum, n) => sum + n, 0);
 }
 
-// This is the tool definition for the 'add' tool.
-// It takes an expression as input and returns the sum of the numbers in the expression.
-server.tool("add",
-  { expression: z.string() },
+server.tool("mathAdditionExample",
+  { expression: z.string().describe("An addition expression like '2+3+4'") },
   async ({ expression }) => {
     try {
       return {
@@ -48,14 +52,17 @@ server.tool("add",
 );
 // #endregion
 
-// #region Highspot API Integration Tools
+// #region Highspot API Integration Tools / Functions
 async function searchHighspot(query) {
   const encodedQuery = encodeURIComponent(query);
   const url = `https://api-su2.highspot.com/v1.0/search/items?query-string=${encodedQuery}&start=0&limit=10&sortby=relevancy`;
 
-  // Use username and password from environment variables for HTTP Basic Auth
   const username = process.env.HIGHSPOT_USERNAME;
   const password = process.env.HIGHSPOT_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error("Highspot username or password not configured in environment variables (HIGHSPOT_USERNAME, HIGHSPOT_PASSWORD).");
+  }
   const authString = Buffer.from(`${username}:${password}`).toString('base64');
 
   const response = await fetch(url, {
@@ -69,23 +76,20 @@ async function searchHighspot(query) {
   if (!response.ok) {
     throw new Error(`Highspot API error: ${response.status} ${response.statusText}`);
   }
-
   return await response.json();
 }
 
-
-// New Tool 2: searchHighspot
-// This tool is used to search the Highspot knowledge base.
-// It takes a search query as input and returns the results of the search.
 server.tool("searchHighspot",
-  { query: z.string() },
+  { query: z.string().describe("The search query for Highspot.") },
   async ({ query }) => {
     try {
       const results = await searchHighspot(query);
       return {
-        content: [{ type: "text", text: JSON.stringify(results) }]
+        // Consider what parts of 'results' are most useful to return.
+        // Returning the full JSON might be verbose for some models.
+        content: [{ type: "text", text: JSON.stringify(results, null, 2) }] 
       };
-    } catch (err) { 
+    } catch (err) {
       return {
         content: [{ type: "text", text: err.message }]
       };
@@ -94,16 +98,61 @@ server.tool("searchHighspot",
 );
 // #endregion
 
+// #region Prompt Definitions
+// Prompt for the mathAdditionExample tool
+server.prompt(
+  "math_addition_example_prompt", // Unique name for this prompt
+  "This prompt helps you add numbers. What is the addition expression you'd like me to calculate? (e.g., '12+3+5')", // Initial message to the user
+  z.object({ // Zod schema for the arguments this prompt expects
+    expression: z.string().describe("The addition expression, like '2+3+4'.")
+  }),
+  async (args) => { // Handler function when the user provides the arguments
+    try {
+      const sum = addExpression(args.expression);
+      return {
+        content: [{ type: "text", text: `The sum of '${args.expression}' is ${sum}.` }]
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `I encountered an issue with that expression: ${err.message}` }]
+      };
+    }
+  }
+);
 
-// #region Prompts
-// New Prompt 1: requestExpressionForAddition
-// This prompt is used to request an addition expression from the user.
-// It also provides a way to try the 'add' tool directly from the prompt. 
-// It expects a non-empty string and returns the sum of the numbers in the expression.
+// Prompt for the searchHighspot tool
+server.prompt(
+  "search_highspot_prompt", // Unique name for this prompt
+  "This prompt helps you search the Highspot knowledge base. What would you like to search for?", // Initial message
+  z.object({ // Zod schema for arguments
+    query: z.string().describe("Your search query for Highspot.")
+  }),
+  async (args) => { // Handler function
+    try {
+      const results = await searchHighspot(args.query);
+      // Decide on the best way to present results. JSON stringify is one way.
+      return {
+        content: [
+          { type: "text", text: `Okay, I searched Highspot for '${args.query}'.` },
+          { type: "text", text: JSON.stringify(results, null, 2) } // Or a summary
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `I encountered an issue searching Highspot: ${err.message}` }]
+      };
+    }
+  }
+);
+
+
+// Existing prompts (if they are still desired and distinct):
+// New Prompt 1: requestExpressionForAddition (This seems similar to math_addition_example_prompt)
+// You might want to consolidate or differentiate them if they serve very similar purposes.
 server.prompt(
   "requestExpressionForAddition",
   "Sure, I can help with that! What is the addition expression you'd like me to calculate? (e.g., '12+3+5')",
-  z.string().min(1, "Please provide an expression."), // Expects a non-empty string
+  z.string().min(1, "Please provide an expression.").describe("The addition expression, like '12+3+5'"),
   async (expressionFromPrompt) => {
     try {
       const result = addExpression(expressionFromPrompt);
@@ -117,14 +166,11 @@ server.prompt(
     }
   }
 );
+
 // New Prompt 2: guidedAdditionHelp
-// This prompt is used to provide help on how to use the 'add' tool.
-// It also provides a way to try the 'add' tool directly from the prompt. 
-// It expects an optional string and returns the sum of the numbers in the expression.  
 server.prompt(
   "guidedAdditionHelp",
-  `The 'add' tool sums numbers (e.g., '@add expression="5+10+15"').  Would you like me to calculate an expression for you now? If so, please provide it.`,
-
+  `The 'add' tool sums numbers (e.g., '@add expression="5+10+15"'). Would you like me to calculate an expression for you now? If so, please provide it.`,
   z.string().optional().describe("Enter an addition expression if you'd like to try, or leave blank for just help."),
   async (expressionFromPrompt) => {
     if (expressionFromPrompt && expressionFromPrompt.trim() !== "") {
@@ -154,14 +200,11 @@ server.prompt(
 // #endregion
   
 // #region Server Connection
-//console.log("[DEBUG] MCP Server: About to create StdioServerTransport");
 const transport = new StdioServerTransport();
-//console.log("[DEBUG] MCP Server: StdioServerTransport created.");
-//console.log("[DEBUG] MCP Server: About to call server.connect(transport)");
 try {
   await server.connect(transport);
-  //console.log("[DEBUG] MCP Server: server.connect(transport) completed successfully.");
+  console.log("MCP Server connected via STDIN/STDOUT."); // Added a log message
 } catch (connectError) {
-  //console.error("[ERROR] MCP Server: Error during server.connect(transport):", connectError);
-} 
+  console.error("[ERROR] MCP Server: Error during server.connect(transport):", connectError);
+}
 // #endregion
